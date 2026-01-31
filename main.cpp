@@ -64,23 +64,26 @@ void TryLogData(const char* label, int offset, uintptr_t ptr, size_t len) {
 }
 
 __int64 __fastcall detoursSub1403A447E(__int64 a1, __int64* a2, char* a3) {
+    Logf("--- Hook Triggered ---");
+
     if (a3) {
-        char* hostPtr = *(char**)(a3 + 120);
-        size_t hostLen = *(size_t*)(a3 + 128);
-        if (hostPtr && !IsBadReadPtr(hostPtr, 1) && hostLen < 512) {
-            Logf("[HOST] %.*s", (int)hostLen, hostPtr);
+        for (int i = 0; i < 256; i += 8) {
+            uintptr_t maybePtr = *(uintptr_t*)(a3 + i);
+            if (maybePtr && !IsBadReadPtr((void*)maybePtr, 4)) {
+                if (memcmp((void*)maybePtr, "http", 4) == 0) {
+                    Logf("[FOUND URL!] Offset %d: %s", i, (char*)maybePtr);
+                }
+            }
         }
     }
 
     if (a2) {
-        for (int i = 0; i < 20; ++i) {
-            uintptr_t p = (uintptr_t)a2[i];
-            size_t l = (size_t)a2[i + 1]; 
-            
-            if (l > 1 && l < 500 && !IsBadReadPtr((void*)p, l)) {
-                char* data = (char*)p;
-                if (data[0] == '/' || strncmp(data, "http", 4) == 0) {
-                    Logf("[PATH/URL FOUND] Offset %d: %.*s", i * 8, (int)l, data);
+        for (int i = 0; i < 20; i++) {
+            char* strPtr = (char*)a2[i];
+            size_t strLen = (size_t)a2[i+1]; 
+            if (strLen > 1 && strLen < 1000 && !IsBadReadPtr(strPtr, strLen)) {
+                if (strPtr[0] == '/' || strncmp(strPtr, "http", 4) == 0) {
+                    Logf("[A2 DATA] Offset %d: %.*s", i * 8, (int)strLen, strPtr);
                 }
             }
         }
