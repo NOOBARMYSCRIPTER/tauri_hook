@@ -2,6 +2,8 @@
 #include <string>
 #include <fstream>
 #include <vector>
+#include <codecvt>
+#include <locale>
 
 typedef int (WINAPI *PFN_MH_Initialize)();
 typedef int (WINAPI *PFN_MH_Uninitialize)();
@@ -39,39 +41,44 @@ static HMODULE LoadMinHookNearModule() {
     return LoadLibraryA("MinHook.x64.dll");
 }
 
-void HexDump(const char* label, void* addr, size_t size) {
-    unsigned char* p = (unsigned char*)addr;
-    std::string dump = "";
-    char buf[16];
-    for (size_t i = 0; i < size; ++i) {
-        sprintf_s(buf, "%02X ", p[i]);
-        dump += buf;
-        if ((i + 1) % 16 == 0) dump += "| ";
+void TryLogData(const char* label, int offset, uintptr_t ptr, size_t len) {
+    if (len == 0 || len > 2048 || IsBadReadPtr((void*)ptr, len)) return;
+
+    std::string ascii((char*)ptr, len);
+    bool isAscii = true;
+    for (char c : ascii) {
+        if (c != 0 && (c < 32 || c > 126)) { isAscii = false; break; }
     }
-    Logf("%s [Addr: %p]: %s", label, addr, dump.c_str());
+
+    if (isAscii && ascii.length() > 0) {
+        Logf("[%s] Offset %d: (ASCII) '%s'", label, offset, ascii.c_str());
+    } 
+    else {
+        try {
+            std::wstring wstr((wchar_t*)ptr, len / 2);
+            if (wstr.length() > 0) {
+                Logf("[%s] Offset %d: (UTF16) '%ls'", label, offset, wstr.c_str());
+            }
+        } catch (...) {}
+    }
 }
 
 __int64 __fastcall detoursSub1403A447E(__int64 a1, __int64* a2, char* a3) {
-    Logf("[DEBUG] Function sub_1403A447E called!");
+    Logf("--- Hook sub_1403A447E ---");
 
     if (a3) {
-        for (int offset = 0; offset <= 112; offset += 8) {
-            uintptr_t maybePtr = *(uintptr_t*)(a3 + offset);
-            size_t maybeLen = *(size_t*)(a3 + offset + 8);
+        for (int i = 0; i <= 128; i += 8) {
+            uintptr_t p = *(uintptr_t*)(a3 + i);
+            size_t l = *(size_t*)(a3 + i + 8);
+            TryLogData("ARG_A3", i, p, l);
+        }
+    }
 
-            if (maybeLen > 0 && maybeLen < 1024 && !IsBadReadPtr((void*)maybePtr, maybeLen)) {
-                char* strData = (char*)maybePtr;
-                
-                char preview[17] = {0};
-                memcpy(preview, strData, maybeLen > 16 ? 16 : maybeLen);
-                
-                Logf("[INFO] Offset %d: Ptr=%p, Len=%llu, Data='%s'", offset, (void*)maybePtr, maybeLen, preview);
-
-                if (maybeLen > 4 && strncmp(strData, "http", 4) == 0) {
-                    std::string url(strData, maybeLen);
-                    Logf("[!!!] FOUND URL at Offset %d: %s", offset, url.c_str());
-                }
-            }
+    if (a2) {
+        for (int i = 0; i <= 128; i += 8) {
+            uintptr_t p = (uintptr_t)a2[i/8];
+            size_t l = (size_t)a2[i/8 + 1];
+            TryLogData("ARG_A2", i, p, l);
         }
     }
 
