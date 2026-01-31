@@ -67,25 +67,28 @@ __int64 __fastcall detoursSub1403A447E(__int64 a1, __int64* a2, char* a3) {
     if (a3) {
         char* urlPtr = *(char**)(a3 + 104);
         size_t urlLen = *(size_t*)(a3 + 112);
-
-        if (urlPtr && !IsBadReadPtr(urlPtr, urlLen)) {
+        
+        if (urlPtr && !IsBadReadPtr(urlPtr, urlLen) && urlLen < 1024) {
             Logf("[URL] %.*s", (int)urlLen, urlPtr);
         }
     }
 
     if (a2) {
-        for (int i = 0; i < 30; i++) {
-            char* maybeData = (char*)a2[i];
-            size_t maybeLen = (size_t)a2[i+1];
+        for (int i = 0; i < 40; i++) {
+            uintptr_t maybePtr = (uintptr_t)a2[i];
+            size_t maybeLen = (size_t)a2[i + 1];
 
-            if (maybeLen > 2 && maybeLen < 5000 && !IsBadReadPtr(maybeData, maybeLen)) {
-                if (maybeData[0] == '{' || strncmp(maybeData, "ey", 2) == 0) {
-                    Logf("[BODY/DATA] Offset %d, Len %llu: %.*s", i * 8, maybeLen, (int)maybeLen, maybeData);
+            if (maybeLen > 2 && maybeLen < 5000 && !IsBadReadPtr((void*)maybePtr, maybeLen)) {
+                char* data = (char*)maybePtr;
+
+                if (data[0] == '{' && data[maybeLen-1] == '}') {
+                    Logf("[BODY JSON] %.*s", (int)maybeLen, data);
                 }
-                if (maybeLen >= 3 && maybeLen <= 7) {
-                    if (strcmp(maybeData, "POST") == 0 || strcmp(maybeData, "GET") == 0) {
-                        Logf("[METHOD] %s", maybeData);
-                    }
+                else if (strnicmp(data, "Bearer", 6) == 0 || strnicmp(data, "Seliware", 8) == 0) {
+                    Logf("[HEADER/AUTH] %.*s", (int)maybeLen, data);
+                }
+                else if (maybeLen > 15 && isprint(data[0]) && isprint(data[1])) {
+                    Logf("[RAW DATA %d] %.*s", i*8, (int)maybeLen, data);
                 }
             }
         }
