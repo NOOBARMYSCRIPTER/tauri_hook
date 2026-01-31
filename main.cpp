@@ -1,6 +1,9 @@
 #include <windows.h>
 #include <string>
 #include <fstream>
+#include <vector>
+
+typedef unsigned __int64 _QWORD;
 
 typedef int (WINAPI* PFN_MH_Initialize)();
 typedef int (WINAPI* PFN_MH_CreateHook)(LPVOID pTarget, LPVOID pDetour, LPVOID* ppOriginal);
@@ -27,26 +30,31 @@ void Logf(const char* format, ...) {
 }
 
 void DumpRustString(const char* label, uintptr_t addr) {
-    if (addr < 0x100000) return;
+    if (addr < 0x10000) return;
     __try {
         char* str = (char*)addr;
         if (str[0] >= 32 && str[0] <= 126) {
             Logf("    [%s]: %hs", label, str);
         }
-    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
 }
 
-__int64 __fastcall detoursTauriIPC(_QWORD *a1, __int64 a2, __int64 a3) {
+__int64 __fastcall detoursTauriIPC(__int64* a1, __int64 a2, __int64 a3) {
     Logf(">>> TAURI IPC CALL DETECTED");
 
     if (a2) {
-        uintptr_t dataPtr = *(uintptr_t*)(a2 + 160);
-        DumpRustString("IPC DATA", dataPtr);
+        __try {
+            uintptr_t dataPtr = *(uintptr_t*)(a2 + 160);
+            DumpRustString("IPC DATA", dataPtr);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
     }
 
     if (a3) {
-        uintptr_t cmdPtr = *(uintptr_t*)(a3 + 232);
-        DumpRustString("COMMAND/URL", cmdPtr);
+        __try {
+            uintptr_t cmdPtr = *(uintptr_t*)(a3 + 232);
+            DumpRustString("COMMAND/URL", cmdPtr);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
     }
 
     return fpTauriIPC(a1, a2, a3);
@@ -58,15 +66,19 @@ static HMODULE LoadMinHookNearModule() {
         std::string sExe(exePath);
         size_t posExe = sExe.find_last_of("\\/");
         std::string exeDir = (posExe == std::string::npos) ? "." : sExe.substr(0, posExe);
-        return LoadLibraryA((exeDir + "\\MinHook.x64.dll").c_str());
+        std::string dllPath = exeDir + "\\MinHook.x64.dll";
+        return LoadLibraryA(dllPath.c_str());
     }
     return nullptr;
 }
 
 DWORD WINAPI InitThread(LPVOID) {
-    Logf("--- Tauri IPC Sniffer Initializing ---");
+    Logf("--- Tauri IPC Sniffer Initializing (Fix Types) ---");
     HMODULE hMinHookDll = LoadMinHookNearModule();
-    if (!hMinHookDll) return 0;
+    if (!hMinHookDll) {
+        Logf("[ERROR] MinHook.x64.dll not found near EXE");
+        return 0;
+    }
 
     pMH_Initialize = (PFN_MH_Initialize)GetProcAddress(hMinHookDll, "MH_Initialize");
     pMH_CreateHook = (PFN_MH_CreateHook)GetProcAddress(hMinHookDll, "MH_CreateHook");
@@ -74,11 +86,13 @@ DWORD WINAPI InitThread(LPVOID) {
 
     if (pMH_Initialize && pMH_Initialize() == 0) {
         uintptr_t base = (uintptr_t)GetModuleHandleA(NULL);
-        uintptr_t target = base + 0x72B24;
+        uintptr_t target = base + 0x72B24; 
 
-        if (pMH_CreateHook((LPVOID)target, &detoursTauriIPC, (LPVOID*)&fpTauriIPC) == 0) {
+        if (pMH_CreateHook((LPVOID)target, (LPVOID)detoursTauriIPC, (LPVOID*)&fpTauriIPC) == 0) {
             pMH_EnableHook((LPVOID)target);
-            Logf("[OK] Hooked Tauri IPC at 0x%p", target);
+            Logf("[OK] Hooked Tauri IPC at 0x%p", (void*)target);
+        } else {
+            Logf("[ERROR] Failed to create hook");
         }
     }
     return 0;
@@ -87,7 +101,8 @@ DWORD WINAPI InitThread(LPVOID) {
 BOOL APIENTRY DllMain(HMODULE h, DWORD r, LPVOID l) {
     if (r == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(h);
-        CreateThread(0, 0, InitThread, 0, 0, 0);
+        HANDLE hThread = CreateThread(0, 0, InitThread, 0, 0, 0);
+        if (hThread) CloseHandle(hThread);
     }
     return TRUE;
 }
