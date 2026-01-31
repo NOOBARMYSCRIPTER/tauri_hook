@@ -2,37 +2,73 @@
 #include <string>
 #include <fstream>
 #include <vector>
-#include <codecvt>
-#include <locale>
+#include <iomanip>
+#include <sstream>
 
-typedef int (WINAPI *PFN_MH_Initialize)();
-typedef int (WINAPI *PFN_MH_Uninitialize)();
-typedef int (WINAPI *PFN_MH_CreateHook)(LPVOID pTarget, LPVOID pDetour, LPVOID* ppOriginal);
-typedef int (WINAPI *PFN_MH_EnableHook)(LPVOID pTarget);
+typedef int (WINAPI* PFN_MH_Initialize)();
+typedef int (WINAPI* PFN_MH_CreateHook)(LPVOID pTarget, LPVOID pDetour, LPVOID* ppOriginal);
+typedef int (WINAPI* PFN_MH_EnableHook)(LPVOID pTarget);
 
 PFN_MH_Initialize   pMH_Initialize = nullptr;
-PFN_MH_Uninitialize pMH_Uninitialize = nullptr;
 PFN_MH_CreateHook   pMH_CreateHook = nullptr;
 PFN_MH_EnableHook   pMH_EnableHook = nullptr;
 
-typedef __int64(__fastcall* tSub1403A447E)(__int64, __int64*, char*);
-tSub1403A447E fpSub1403A447E = nullptr;
-
-typedef void(__fastcall* tSub1405EB340)(__int64, __int64, __int64, __int64, __int64);
-tSub1405EB340 fpSub1405EB340 = nullptr;
+typedef __int64(__fastcall* tSub1403A3DBB)(__int64*, __int64, __int64);
+tSub1403A3DBB fpSub1403A3DBB = nullptr;
 
 void Logf(const char* format, ...) {
-    char buffer[1024];
+    char buffer[2048];
     va_list args;
     va_start(args, format);
     vsprintf_s(buffer, format, args);
     std::ofstream log("intercept_log.txt", std::ios::app);
-    log << buffer << std::endl;
+    if (log.is_open()) {
+        log << buffer << std::endl;
+        log.flush();
+    }
     va_end(args);
 }
 
+std::string HexDump(void* ptr, int size) {
+    if (!ptr || IsBadReadPtr(ptr, size)) return "[INVALID]";
+    unsigned char* p = (unsigned char*)ptr;
+    std::stringstream ss;
+    for (int i = 0; i < size; i++) {
+        ss << std::hex << std::setw(2) << std::setfill('0') << (int)p[i] << " ";
+    }
+    return ss.str();
+}
+
+__int64 __fastcall detoursSub1403A3DBB(__int64* a1, __int64 a2, __int64 a3) {
+    __int64 result = fpSub1403A3DBB(a1, a2, a3);
+
+    static int calls = 0;
+    if (++calls % 5 == 0) {
+        Logf(">>> sub_1403A3DBB Called (%d). Result: %lld", calls, result);
+        
+        if (a1) {
+            Logf("    a1 Dump: %s", HexDump(a1, 48).c_str());
+            
+            uintptr_t dataPtr = a1[1];
+            if (dataPtr > 0x10000 && !IsBadReadPtr((void*)dataPtr, 64)) {
+                Logf("    Data at [a1+8]: %s", HexDump((void*)dataPtr, 64).c_str());
+                
+                char* s = (char*)dataPtr;
+                for (int i = 0; i < 60; i++) {
+                    if (s[i] == 'h' && s[i+1] == 't' && s[i+2] == 't') {
+                        Logf("    [!] Possible URL: %s", &s[i]);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    return result;
+}
+
 static HMODULE LoadMinHookNearModule() {
-    char exePath[MAX_PATH] = {0};
+    char exePath[MAX_PATH] = { 0 };
     if (GetModuleFileNameA(NULL, exePath, MAX_PATH)) {
         std::string sExe(exePath);
         size_t posExe = sExe.find_last_of("\\/");
@@ -44,87 +80,38 @@ static HMODULE LoadMinHookNearModule() {
     return LoadLibraryA("MinHook.x64.dll");
 }
 
-__int64 __fastcall detoursSub1403A447E(__int64 a1, __int64* a2, char* a3) {
-    Logf("--- Request Construction Detected ---");
-
-    if (a2) {
-        unsigned char* raw = (unsigned char*)a2;
-        for (int i = 0; i < 512; i++) {
-            if (raw[i] == '{' || (raw[i] == 'H' && raw[i+1] == 'o' && raw[i+2] == 's' && raw[i+3] == 't')) {
-                Logf("[DATA FOUND AT OFFSET %d] %s", i, &raw[i]);
-            }
-        }
-    }
-
-    if (a3) {
-        char* urlPtr = *(char**)(a3 + 104);
-        size_t urlLen = *(size_t*)(a3 + 112);
-        if (urlPtr && !IsBadReadPtr(urlPtr, urlLen)) {
-            Logf("[URL] %.*s", (int)urlLen, urlPtr);
-        }
-    }
-
-    return fpSub1403A447E(a1, a2, a3);
-}
-
-void ScanForData(const char* label, uintptr_t addr, size_t size) {
-    if (IsBadReadPtr((void*)addr, size)) return;
-    unsigned char* data = (unsigned char*)addr;
-    for (size_t i = 0; i < size - 5; i++) {
-        if (data[i] == '{' || (data[i] == 'H' && data[i+1] == 'o' && data[i+2] == 's')) {
-            Logf("[%s FOUND] %s", label, &data[i]);
-        }
-    }
-}
-
-void __fastcall detoursSub1405EB340(__int64 a1, __int64 a2, __int64 a3, __int64 a4, __int64 a5) {
-    Logf("--- LOG TRIGGERED (sub_1405EB340) ---");
-
-    if (a1 && !IsBadReadPtr((void*)a1, 32)) {
-        Logf("[LOG LABEL] %s", (char*)a1);
-    }
-
-    if (a3) {
-        ScanForData("A3_DIRECT", (uintptr_t)a3, 512);
-        
-        uintptr_t deeper = *(uintptr_t*)a3;
-        if (deeper > 0x10000) {
-            ScanForData("A3_DEEP", deeper, 1024);
-        }
-    }
-
-    if (a5) ScanForData("A5_SCAN", (uintptr_t)a5, 256);
-
-
-    fpSub1405EB340(a1, a2, a3, a4, a5);
-}
-
 DWORD WINAPI InitThread(LPVOID) {
+    Logf("--- DLL Injected. Initializing... ---");
+    
     HMODULE hMinHookDll = LoadMinHookNearModule();
-    if (!hMinHookDll) return 0;
+    if (!hMinHookDll) {
+        Logf("[ERR] MinHook.x64.dll not found nearby!");
+        return 0;
+    }
 
     pMH_Initialize = (PFN_MH_Initialize)GetProcAddress(hMinHookDll, "MH_Initialize");
     pMH_CreateHook = (PFN_MH_CreateHook)GetProcAddress(hMinHookDll, "MH_CreateHook");
     pMH_EnableHook = (PFN_MH_EnableHook)GetProcAddress(hMinHookDll, "MH_EnableHook");
 
-    if (pMH_Initialize() == 0) {
+    if (pMH_Initialize && pMH_Initialize() == 0) {
         uintptr_t base = (uintptr_t)GetModuleHandleA(NULL);
-        
-        uintptr_t targetLog = base + 0x5EB340;
-        uintptr_t targetReq = base + 0x3A447E;
+        uintptr_t target = base + 0x3A3DBB;
 
-        pMH_CreateHook((LPVOID)targetLog, &detoursSub1405EB340, (LPVOID*)&fpSub1405EB340);
-        pMH_EnableHook((LPVOID)targetLog);
-
-        // pMH_CreateHook((LPVOID)targetReq, &detoursSub1403A447E, (LPVOID*)&fpSub1403A447E);
-        // pMH_EnableHook((LPVOID)targetReq);
-
-        Logf("[OK] Hooks set. Waiting for requests...");
+        int status = pMH_CreateHook((LPVOID)target, &detoursSub1403A3DBB, (LPVOID*)&fpSub1403A3DBB);
+        if (status == 0) {
+            pMH_EnableHook((LPVOID)target);
+            Logf("[OK] Hook set at 0x%p", target);
+        } else {
+            Logf("[ERR] MH_CreateHook failed. Status: %d", status);
+        }
     }
     return 0;
 }
 
 BOOL APIENTRY DllMain(HMODULE h, DWORD r, LPVOID l) {
-    if (r == DLL_PROCESS_ATTACH) CreateThread(0, 0, InitThread, 0, 0, 0);
+    if (r == DLL_PROCESS_ATTACH) {
+        DisableThreadLibraryCalls(h);
+        CreateThread(0, 0, InitThread, 0, 0, 0);
+    }
     return TRUE;
 }
