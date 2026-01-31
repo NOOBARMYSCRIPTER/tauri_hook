@@ -18,6 +18,9 @@ PFN_MH_EnableHook   pMH_EnableHook = nullptr;
 typedef __int64(__fastcall* tSub1403A447E)(__int64, __int64*, char*);
 tSub1403A447E fpSub1403A447E = nullptr;
 
+typedef void(__fastcall* tSub1405EB340)(__int64, __int64, __int64, __int64, __int64);
+tSub1405EB340 fpSub1405EB340 = nullptr;
+
 void Logf(const char* format, ...) {
     char buffer[1024];
     va_list args;
@@ -41,54 +44,64 @@ static HMODULE LoadMinHookNearModule() {
     return LoadLibraryA("MinHook.x64.dll");
 }
 
-void DumpMemoryStrings(const char* label, uintptr_t startAddr, size_t range) {
-    if (IsBadReadPtr((void*)startAddr, range)) return;
+__int64 __fastcall detoursSub1403A447E(__int64 a1, __int64* a2, char* a3) {
+    Logf("--- Request Construction Detected ---");
 
-    for (size_t i = 0; i < range - 8; i += 1) {
-        const char* potentialStr = (const char*)(startAddr + i);
-        
-        bool looksLikeJson = (potentialStr[0] == '{' && potentialStr[1] == '"');
-        bool looksLikeHeader = (strnicmp(potentialStr, "user-agent", 10) == 0 || 
-                               strnicmp(potentialStr, "content-type", 12) == 0 ||
-                               strnicmp(potentialStr, "authorization", 13) == 0 ||
-                               strnicmp(potentialStr, "x-", 2) == 0);
-
-        if (looksLikeJson || looksLikeHeader) {
-            Logf("[%s] Found at offset +%llu: %s", label, i, potentialStr);
+    if (a2) {
+        unsigned char* raw = (unsigned char*)a2;
+        for (int i = 0; i < 512; i++) {
+            if (raw[i] == '{' || (raw[i] == 'H' && raw[i+1] == 'o' && raw[i+2] == 's' && raw[i+3] == 't')) {
+                Logf("[DATA FOUND AT OFFSET %d] %s", i, &raw[i]);
+            }
         }
     }
-}
-
-__int64 __fastcall detoursSub1403A447E(__int64 a1, __int64* a2, char* a3) {
-    Logf("--- Hook Triggered (Deep Scan) ---");
 
     if (a3) {
         char* urlPtr = *(char**)(a3 + 104);
-        if (!IsBadReadPtr(urlPtr, 1)) Logf("[URL] %s", urlPtr);
-        
-        DumpMemoryStrings("A3_SCAN", (uintptr_t)a3, 512);
-    }
-
-    if (a2) {
-        DumpMemoryStrings("A2_SCAN", (uintptr_t)a2, 512);
-        
-        for (int j = 0; j < 32; j++) {
-            uintptr_t ptr = (uintptr_t)a2[j];
-            if (ptr > 0x10000 && !IsBadReadPtr((void*)ptr, 64)) {
-                DumpMemoryStrings("A2_INDIR_SCAN", ptr, 256);
-            }
+        size_t urlLen = *(size_t*)(a3 + 112);
+        if (urlPtr && !IsBadReadPtr(urlPtr, urlLen)) {
+            Logf("[URL] %.*s", (int)urlLen, urlPtr);
         }
     }
 
     return fpSub1403A447E(a1, a2, a3);
 }
 
+void ScanForData(const char* label, uintptr_t addr, size_t size) {
+    if (IsBadReadPtr((void*)addr, size)) return;
+    unsigned char* data = (unsigned char*)addr;
+    for (size_t i = 0; i < size - 5; i++) {
+        if (data[i] == '{' || (data[i] == 'H' && data[i+1] == 'o' && data[i+2] == 's')) {
+            Logf("[%s FOUND] %s", label, &data[i]);
+        }
+    }
+}
+
+void __fastcall detoursSub1405EB340(__int64 a1, __int64 a2, __int64 a3, __int64 a4, __int64 a5) {
+    Logf("--- LOG TRIGGERED (sub_1405EB340) ---");
+
+    if (a1 && !IsBadReadPtr((void*)a1, 32)) {
+        Logf("[LOG LABEL] %s", (char*)a1);
+    }
+
+    if (a3) {
+        ScanForData("A3_DIRECT", (uintptr_t)a3, 512);
+        
+        uintptr_t deeper = *(uintptr_t*)a3;
+        if (deeper > 0x10000) {
+            ScanForData("A3_DEEP", deeper, 1024);
+        }
+    }
+
+    if (a5) ScanForData("A5_SCAN", (uintptr_t)a5, 256);
+
+
+    fpSub1405EB340(a1, a2, a3, a4, a5);
+}
+
 DWORD WINAPI InitThread(LPVOID) {
     HMODULE hMinHookDll = LoadMinHookNearModule();
-    if (!hMinHookDll) {
-        Logf("[ERR] MinHook.x64.dll not found!");
-        return 0;
-    }
+    if (!hMinHookDll) return 0;
 
     pMH_Initialize = (PFN_MH_Initialize)GetProcAddress(hMinHookDll, "MH_Initialize");
     pMH_CreateHook = (PFN_MH_CreateHook)GetProcAddress(hMinHookDll, "MH_CreateHook");
@@ -96,12 +109,17 @@ DWORD WINAPI InitThread(LPVOID) {
 
     if (pMH_Initialize() == 0) {
         uintptr_t base = (uintptr_t)GetModuleHandleA(NULL);
-        uintptr_t target = base + 0x3A447E;
+        
+        uintptr_t targetLog = base + 0x5EB340;
+        uintptr_t targetReq = base + 0x3A447E;
 
-        if (pMH_CreateHook((LPVOID)target, &detoursSub1403A447E, (LPVOID*)&fpSub1403A447E) == 0) {
-            pMH_EnableHook((LPVOID)target);
-            Logf("[OK] Hook set at: %p", target);
-        }
+        pMH_CreateHook((LPVOID)targetLog, &detoursSub1405EB340, (LPVOID*)&fpSub1405EB340);
+        pMH_EnableHook((LPVOID)targetLog);
+
+        // pMH_CreateHook((LPVOID)targetReq, &detoursSub1403A447E, (LPVOID*)&fpSub1403A447E);
+        // pMH_EnableHook((LPVOID)targetReq);
+
+        Logf("[OK] Hooks set. Waiting for requests...");
     }
     return 0;
 }
