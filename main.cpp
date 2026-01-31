@@ -39,34 +39,53 @@ std::string HexDump(void* ptr, int size) {
     return ss.str();
 }
 
+void TryLogAsText(const char* label, uintptr_t addr, size_t maxLen = 256) {
+    if (addr < 0x100000 || IsBadReadPtr((void*)addr, 8)) return;
+    
+    char* buf = (char*)addr;
+
+    bool looksLikeText = true;
+    for(int i = 0; i < 4; i++) {
+        if (buf[i] < 32 || buf[i] > 126) { looksLikeText = false; break; }
+    }
+
+    if (looksLikeText) {
+
+        if (strstr(buf, "http") || strstr(buf, "host") || strstr(buf, "{") || strstr(buf, "content")) {
+            Logf("    [!!!] %s FOUND: %s", label, buf);
+        }
+    }
+}
+
 __int64 __fastcall detoursSub1403A3DBB(__int64* a1, __int64 a2, __int64 a3) {
     __int64 result = fpSub1403A3DBB(a1, a2, a3);
 
-    if (a1 && (*(char*)a1 == 0)) {
-        Logf(">>> STATUS READY DETECTED");
-
-        uintptr_t dataPtr = (uintptr_t)a1[4]; 
-        
-        if (dataPtr > 0x100000) {
-            Logf("    Deep Dump at [a1+32] (Address: %p):", (void*)dataPtr);
-            Logf("    Data: %s", HexDump((void*)dataPtr, 128).c_str());
-
-            char* s = (char*)dataPtr;
-            if (!IsBadReadPtr(s, 128)) {
-                for (int i = 0; i < 110; i++) {
-                    if ((s[i] == 'h' && s[i+1] == 't') || (s[i] == '{' && s[i+1] == '"')) {
-                        Logf("    [!!!] STRING FOUND: %s", &s[i]);
-                    }
+    if (a1 && (*(char*)a1 != 4)) { 
+        for (int i = 0; i < 20; i++) { 
+            uintptr_t ptr = (uintptr_t)a1[i];
+            if (ptr > 0x100000) {
+                TryLogAsText("BASE_STR", ptr);
+                
+                if (!IsBadReadPtr((void*)ptr, 16)) {
+                    uintptr_t deepPtr = *(uintptr_t*)ptr;
+                    TryLogAsText("DEEP_STR", deepPtr);
+                    
+                    uintptr_t deepPtr2 = *(uintptr_t*)(ptr + 8);
+                    TryLogAsText("DEEP_STR_ALT", deepPtr2);
                 }
             }
         }
-        
-        uintptr_t dataPtrAlt = (uintptr_t)a1[1];
-        if (dataPtrAlt > 0x100000 && !IsBadReadPtr((void*)dataPtrAlt, 16)) {
-             Logf("    Alt Dump at [a1+8]: %s", HexDump((void*)dataPtrAlt, 64).c_str());
+
+        uintptr_t deepStruct = (uintptr_t)a1[4];
+        if (deepStruct > 0x100000 && !IsBadReadPtr((void*)deepStruct, 128)) {
+            uintptr_t* structPtrs = (uintptr_t*)deepStruct;
+            for (int j = 0; j < 16; j++) {
+                if (structPtrs[j] > 0x100000) {
+                    TryLogAsText("INNER_VAL", structPtrs[j]);
+                }
+            }
         }
     }
-
     return result;
 }
 
