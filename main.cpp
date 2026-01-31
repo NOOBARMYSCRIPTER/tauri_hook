@@ -39,16 +39,37 @@ static HMODULE LoadMinHookNearModule() {
     return LoadLibraryA("MinHook.x64.dll");
 }
 
+void HexDump(const char* label, void* addr, size_t size) {
+    unsigned char* p = (unsigned char*)addr;
+    std::string dump = "";
+    char buf[16];
+    for (size_t i = 0; i < size; ++i) {
+        sprintf_s(buf, "%02X ", p[i]);
+        dump += buf;
+        if ((i + 1) % 16 == 0) dump += "| ";
+    }
+    Logf("%s [Addr: %p]: %s", label, addr, dump.c_str());
+}
+
 __int64 __fastcall detoursSub1403A447E(__int64 a1, __int64* a2, char* a3) {
     Logf("[DEBUG] Function sub_1403A447E called!");
+
     if (a3) {
-        char* urlPtr = *(char**)(a3 + 96);
-        size_t urlLen = *(size_t*)(a3 + 104);
-        if (urlPtr && urlLen > 0 && urlLen < 1024) {
-            std::string url(urlPtr, urlLen);
-            Logf("[HOOK] URL: %s", url.c_str());
+        HexDump("a3_dump", a3, 128);
+
+        for (int offset = 0; offset <= 112; offset += 8) {
+            char* maybePtr = *(char**)(a3 + offset);
+            size_t maybeLen = *(size_t*)(a3 + offset + 8);
+
+            if (maybeLen > 10 && maybeLen < 500 && !IsBadReadPtr(maybePtr, maybeLen)) {
+                if (maybePtr[0] == 'h' && maybePtr[1] == 't') {
+                    std::string url(maybePtr, maybeLen);
+                    Logf("[FOUND!] Offset %d -> URL: %s", offset, url.c_str());
+                }
+            }
         }
     }
+
     return fpSub1403A447E(a1, a2, a3);
 }
 
