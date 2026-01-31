@@ -10,8 +10,8 @@ PFN_MH_Initialize   pMH_Initialize = nullptr;
 PFN_MH_CreateHook   pMH_CreateHook = nullptr;
 PFN_MH_EnableHook   pMH_EnableHook = nullptr;
 
-typedef __int64(__fastcall* tSub14055DF30)(__int64, char*);
-tSub14055DF30 fpSub14055DF30 = nullptr;
+typedef __int64(__fastcall* tTauriIPC)(__int64*, __int64, __int64);
+tTauriIPC fpTauriIPC = nullptr;
 
 void Logf(const char* format, ...) {
     char buffer[4096];
@@ -26,60 +26,30 @@ void Logf(const char* format, ...) {
     va_end(args);
 }
 
-bool SafeReadStr(uintptr_t addr, char* outBuf, size_t maxLen) {
-    if (addr < 0x10000) return false;
+void DumpRustString(const char* label, uintptr_t addr) {
+    if (addr < 0x100000) return;
     __try {
-        const char* s = (const char*)addr;
-        size_t len = 0;
-        while (len < maxLen - 1 && s[len] != '\0') {
-            outBuf[len] = s[len];
-            len++;
+        char* str = (char*)addr;
+        if (str[0] >= 32 && str[0] <= 126) {
+            Logf("    [%s]: %hs", label, str);
         }
-        outBuf[len] = '\0';
-        return len > 0;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return false;
-    }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
 }
 
-__int64 __fastcall detoursSub14055DF30(__int64 a1, char* a2) {
-    Logf(">>> HTTP BUILDER TRIGGERED (Handle: %p)", (void*)a1);
+__int64 __fastcall detoursTauriIPC(_QWORD *a1, __int64 a2, __int64 a3) {
+    Logf(">>> TAURI IPC CALL DETECTED");
 
-    uintptr_t urlAddr = *(uintptr_t*)(a1 + 4440);
-    char urlBuf[1024] = {0};
-    if (SafeReadStr(urlAddr, urlBuf, 1024)) {
-        Logf("    [URL] %s", urlBuf);
+    if (a2) {
+        uintptr_t dataPtr = *(uintptr_t*)(a2 + 160);
+        DumpRustString("IPC DATA", dataPtr);
     }
 
-    uintptr_t queryAddr = *(uintptr_t*)(a1 + 4448);
-    char queryBuf[1024] = {0};
-    if (SafeReadStr(queryAddr, queryBuf, 1024)) {
-        Logf("    [QUERY] ?%s", queryBuf);
+    if (a3) {
+        uintptr_t cmdPtr = *(uintptr_t*)(a3 + 232);
+        DumpRustString("COMMAND/URL", cmdPtr);
     }
 
-    unsigned char v8 = *(unsigned char*)(a1 + 4855);
-    const char* method = "UNKNOWN";
-    switch(v8) {
-        case 1: case 2: case 3: method = "POST"; break;
-        case 4: method = "PUT"; break;
-        case 5: method = "HEAD"; break;
-        default: method = "GET"; break;
-    }
-    Logf("    [METHOD] %s (Internal ID: %d)", method, v8);
-
-    uintptr_t postDataAddr = *(uintptr_t*)(a1 + 456);
-    char postBuf[2048] = {0};
-    if (SafeReadStr(postDataAddr, postBuf, 2048)) {
-        Logf("    [POST BODY] %s", postBuf);
-    }
-
-    uintptr_t uaAddr = *(uintptr_t*)(a1 + 2040);
-    char uaBuf[256] = {0};
-    if (SafeReadStr(uaAddr, uaBuf, 256)) {
-        Logf("    [USER-AGENT] %s", uaBuf);
-    }
-
-    return fpSub14055DF30(a1, a2);
+    return fpTauriIPC(a1, a2, a3);
 }
 
 static HMODULE LoadMinHookNearModule() {
@@ -88,14 +58,13 @@ static HMODULE LoadMinHookNearModule() {
         std::string sExe(exePath);
         size_t posExe = sExe.find_last_of("\\/");
         std::string exeDir = (posExe == std::string::npos) ? "." : sExe.substr(0, posExe);
-        HMODULE h = LoadLibraryA((exeDir + "\\MinHook.x64.dll").c_str());
-        if (h) return h;
+        return LoadLibraryA((exeDir + "\\MinHook.x64.dll").c_str());
     }
-    return LoadLibraryA("MinHook.x64.dll");
+    return nullptr;
 }
 
 DWORD WINAPI InitThread(LPVOID) {
-    Logf("--- New Sniffer Initializing (sub_14055DF30) ---");
+    Logf("--- Tauri IPC Sniffer Initializing ---");
     HMODULE hMinHookDll = LoadMinHookNearModule();
     if (!hMinHookDll) return 0;
 
@@ -105,11 +74,11 @@ DWORD WINAPI InitThread(LPVOID) {
 
     if (pMH_Initialize && pMH_Initialize() == 0) {
         uintptr_t base = (uintptr_t)GetModuleHandleA(NULL);
-        uintptr_t target = base + 0x55DF30;
+        uintptr_t target = base + 0x72B24;
 
-        if (pMH_CreateHook((LPVOID)target, &detoursSub14055DF30, (LPVOID*)&fpSub14055DF30) == 0) {
+        if (pMH_CreateHook((LPVOID)target, &detoursTauriIPC, (LPVOID*)&fpTauriIPC) == 0) {
             pMH_EnableHook((LPVOID)target);
-            Logf("[OK] Hooked HTTP Builder at 0x%p", target);
+            Logf("[OK] Hooked Tauri IPC at 0x%p", target);
         }
     }
     return 0;
