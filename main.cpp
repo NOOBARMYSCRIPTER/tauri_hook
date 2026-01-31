@@ -1,9 +1,6 @@
 #include <windows.h>
 #include <string>
 #include <fstream>
-#include <vector>
-#include <iomanip>
-#include <sstream>
 
 typedef int (WINAPI* PFN_MH_Initialize)();
 typedef int (WINAPI* PFN_MH_CreateHook)(LPVOID pTarget, LPVOID pDetour, LPVOID* ppOriginal);
@@ -13,8 +10,8 @@ PFN_MH_Initialize   pMH_Initialize = nullptr;
 PFN_MH_CreateHook   pMH_CreateHook = nullptr;
 PFN_MH_EnableHook   pMH_EnableHook = nullptr;
 
-typedef __int64(__fastcall* tSub14054AC50)(__int64);
-tSub14054AC50 fpSub14054AC50 = nullptr;
+typedef __int64(__fastcall* tSub14055DF30)(__int64, char*);
+tSub14055DF30 fpSub14055DF30 = nullptr;
 
 void Logf(const char* format, ...) {
     char buffer[4096];
@@ -29,49 +26,60 @@ void Logf(const char* format, ...) {
     va_end(args);
 }
 
-bool SafeRead(void* dest, void* src, size_t size) {
+bool SafeReadStr(uintptr_t addr, char* outBuf, size_t maxLen) {
+    if (addr < 0x10000) return false;
     __try {
-        memcpy(dest, src, size);
-        return true;
+        const char* s = (const char*)addr;
+        size_t len = 0;
+        while (len < maxLen - 1 && s[len] != '\0') {
+            outBuf[len] = s[len];
+            len++;
+        }
+        outBuf[len] = '\0';
+        return len > 0;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
 }
 
-__int64 __fastcall detoursSub14054AC50(__int64 a1) {
-    Logf("--------------------------------------------------");
-    Logf(">>> NETWORK REQUEST CAPTURED (Handle: %p)", (void*)a1);
+__int64 __fastcall detoursSub14055DF30(__int64 a1, char* a2) {
+    Logf(">>> HTTP BUILDER TRIGGERED (Handle: %p)", (void*)a1);
 
-    uintptr_t urlPtr = *(uintptr_t*)(a1 + 2032);
-    if (urlPtr > 0x10000) {
-        char urlBuf[512] = {0};
-        if (SafeRead(urlBuf, (void*)urlPtr, 511)) {
-            Logf("[URL] %s", urlBuf);
-        }
+    uintptr_t urlAddr = *(uintptr_t*)(a1 + 4440);
+    char urlBuf[1024] = {0};
+    if (SafeReadStr(urlAddr, urlBuf, 1024)) {
+        Logf("    [URL] %s", urlBuf);
     }
 
-    uintptr_t uaPtr = *(uintptr_t*)(a1 + 2040);
-    if (uaPtr > 0x10000) {
-        char uaBuf[256] = {0};
-        if (SafeRead(uaBuf, (void*)uaPtr, 255)) {
-            Logf("[UA ] %s", uaBuf);
-        }
+    uintptr_t queryAddr = *(uintptr_t*)(a1 + 4448);
+    char queryBuf[1024] = {0};
+    if (SafeReadStr(queryAddr, queryBuf, 1024)) {
+        Logf("    [QUERY] ?%s", queryBuf);
     }
 
-    uintptr_t postPtr = *(uintptr_t*)(a1 + 456);
-    if (postPtr > 0x10000) {
-        char postBuf[1024] = {0};
-        if (SafeRead(postBuf, (void*)postPtr, 1023)) {
-            Logf("[BODY] %s", postBuf);
-        }
+    unsigned char v8 = *(unsigned char*)(a1 + 4855);
+    const char* method = "UNKNOWN";
+    switch(v8) {
+        case 1: case 2: case 3: method = "POST"; break;
+        case 4: method = "PUT"; break;
+        case 5: method = "HEAD"; break;
+        default: method = "GET"; break;
+    }
+    Logf("    [METHOD] %s (Internal ID: %d)", method, v8);
+
+    uintptr_t postDataAddr = *(uintptr_t*)(a1 + 456);
+    char postBuf[2048] = {0};
+    if (SafeReadStr(postDataAddr, postBuf, 2048)) {
+        Logf("    [POST BODY] %s", postBuf);
     }
 
-    unsigned char methodIdx = *(unsigned char*)(a1 + 4855);
-    Logf("[MET] Method Index: %d", (int)methodIdx);
+    uintptr_t uaAddr = *(uintptr_t*)(a1 + 2040);
+    char uaBuf[256] = {0};
+    if (SafeReadStr(uaAddr, uaBuf, 256)) {
+        Logf("    [USER-AGENT] %s", uaBuf);
+    }
 
-    Logf("--------------------------------------------------");
-
-    return fpSub14054AC50(a1);
+    return fpSub14055DF30(a1, a2);
 }
 
 static HMODULE LoadMinHookNearModule() {
@@ -80,16 +88,14 @@ static HMODULE LoadMinHookNearModule() {
         std::string sExe(exePath);
         size_t posExe = sExe.find_last_of("\\/");
         std::string exeDir = (posExe == std::string::npos) ? "." : sExe.substr(0, posExe);
-        std::string dllPath = exeDir + "\\MinHook.x64.dll";
-        HMODULE h = LoadLibraryA(dllPath.c_str());
+        HMODULE h = LoadLibraryA((exeDir + "\\MinHook.x64.dll").c_str());
         if (h) return h;
     }
     return LoadLibraryA("MinHook.x64.dll");
 }
 
 DWORD WINAPI InitThread(LPVOID) {
-    Logf("--- Initializing Stealth Network Sniffer ---");
-    
+    Logf("--- New Sniffer Initializing (sub_14055DF30) ---");
     HMODULE hMinHookDll = LoadMinHookNearModule();
     if (!hMinHookDll) return 0;
 
@@ -99,15 +105,11 @@ DWORD WINAPI InitThread(LPVOID) {
 
     if (pMH_Initialize && pMH_Initialize() == 0) {
         uintptr_t base = (uintptr_t)GetModuleHandleA(NULL);
-        
-        uintptr_t target = base + 0x54AC50;
+        uintptr_t target = base + 0x55DF30;
 
-        int status = pMH_CreateHook((LPVOID)target, &detoursSub14054AC50, (LPVOID*)&fpSub14054AC50);
-        if (status == 0) {
+        if (pMH_CreateHook((LPVOID)target, &detoursSub14055DF30, (LPVOID*)&fpSub14055DF30) == 0) {
             pMH_EnableHook((LPVOID)target);
-            Logf("[OK] Sniffer active at 0x%p", target);
-        } else {
-            Logf("[ERR] Hook failed: %d", status);
+            Logf("[OK] Hooked HTTP Builder at 0x%p", target);
         }
     }
     return 0;
