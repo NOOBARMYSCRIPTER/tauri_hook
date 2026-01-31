@@ -40,6 +40,7 @@ static HMODULE LoadMinHookNearModule() {
 }
 
 __int64 __fastcall detoursSub1403A447E(__int64 a1, __int64* a2, char* a3) {
+    Logf("[DEBUG] Function sub_1403A447E called!");
     if (a3) {
         char* urlPtr = *(char**)(a3 + 96);
         size_t urlLen = *(size_t*)(a3 + 104);
