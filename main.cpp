@@ -57,31 +57,45 @@ void TryLogAsText(const char* label, uintptr_t addr, size_t maxLen = 256) {
     }
 }
 
+bool SafeRead(void* dest, void* src, size_t size) {
+    __try {
+        memcpy(dest, src, size);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 __int64 __fastcall detoursSub1403A3DBB(__int64* a1, __int64 a2, __int64 a3) {
     __int64 result = fpSub1403A3DBB(a1, a2, a3);
 
-    if (a1 && (*(char*)a1 != 4)) { 
-        for (int i = 0; i < 20; i++) { 
-            uintptr_t ptr = (uintptr_t)a1[i];
-            if (ptr > 0x100000) {
-                TryLogAsText("BASE_STR", ptr);
-                
-                if (!IsBadReadPtr((void*)ptr, 16)) {
-                    uintptr_t deepPtr = *(uintptr_t*)ptr;
-                    TryLogAsText("DEEP_STR", deepPtr);
-                    
-                    uintptr_t deepPtr2 = *(uintptr_t*)(ptr + 8);
-                    TryLogAsText("DEEP_STR_ALT", deepPtr2);
-                }
-            }
-        }
+    if (a1 && (*(unsigned char*)a1 != 4)) {
+        Logf(">>> Event Detected (Status: %d)", *(int*)a1);
 
-        uintptr_t deepStruct = (uintptr_t)a1[4];
-        if (deepStruct > 0x100000 && !IsBadReadPtr((void*)deepStruct, 128)) {
-            uintptr_t* structPtrs = (uintptr_t*)deepStruct;
-            for (int j = 0; j < 16; j++) {
-                if (structPtrs[j] > 0x100000) {
-                    TryLogAsText("INNER_VAL", structPtrs[j]);
+        for (int i = 0; i < 8; i++) {
+            uintptr_t ptr = (uintptr_t)a1[i];
+            
+            if (ptr > 0x100000 && ptr < 0x00007FFFFFFFFFFF) {
+                char tempBuf[128] = {0};
+                if (SafeRead(tempBuf, (void*)ptr, 127)) {
+                    if (tempBuf[0] >= 32 && tempBuf[0] <= 126) {
+                        Logf("    [OFFSET %d] PTR %p -> STR: %s", i * 8, (void*)ptr, tempBuf);
+                    } else {
+                        std::string hex = HexDump(tempBuf, 16);
+                        Logf("    [OFFSET %d] PTR %p -> HEX: %s", i * 8, (void*)ptr, hex.c_str());
+                    }
+
+                    uintptr_t* deepPtrs = (uintptr_t*)tempBuf;
+                    for (int j = 0; j < 4; j++) {
+                        if (deepPtrs[j] > 0x100000 && deepPtrs[j] < 0x00007FFFFFFFFFFF) {
+                            char deepBuf[128] = {0};
+                            if (SafeRead(deepBuf, (void*)deepPtrs[j], 127)) {
+                                if (deepBuf[0] >= 32 && deepBuf[0] <= 126) {
+                                    Logf("      L> DEEP STR: %s", deepBuf);
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
