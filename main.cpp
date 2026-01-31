@@ -65,23 +65,24 @@ void TryLogData(const char* label, int offset, uintptr_t ptr, size_t len) {
 
 __int64 __fastcall detoursSub1403A447E(__int64 a1, __int64* a2, char* a3) {
     if (a3) {
-        char* urlPtr = *(char**)(a3 + 120);
-        size_t urlLen = *(size_t*)(a3 + 128); 
-
-        if (urlPtr && !IsBadReadPtr(urlPtr, 1)) {
-            std::string finalUrl;
-            if (urlLen > 0 && urlLen < 2048) {
-                finalUrl = std::string(urlPtr, urlLen);
-            } else {
-                finalUrl = std::string(urlPtr);
-            }
-
-            Logf("[!!!] TARGET HOST/URL: %s", finalUrl.c_str());
+        char* hostPtr = *(char**)(a3 + 120);
+        size_t hostLen = *(size_t*)(a3 + 128);
+        if (hostPtr && !IsBadReadPtr(hostPtr, 1) && hostLen < 512) {
+            Logf("[HOST] %.*s", (int)hostLen, hostPtr);
         }
-        
-        char* altPtr = *(char**)(a3 + 112);
-        if (altPtr && !IsBadReadPtr(altPtr, 1) && !IsBadCodePtr((FARPROC)altPtr)) {
-             Logf("[DEBUG] Data at offset 112: %.32s", altPtr);
+    }
+
+    if (a2) {
+        for (int i = 0; i < 20; ++i) {
+            uintptr_t p = (uintptr_t)a2[i];
+            size_t l = (size_t)a2[i + 1]; 
+            
+            if (l > 1 && l < 500 && !IsBadReadPtr((void*)p, l)) {
+                char* data = (char*)p;
+                if (data[0] == '/' || strncmp(data, "http", 4) == 0) {
+                    Logf("[PATH/URL FOUND] Offset %d: %.*s", i * 8, (int)l, data);
+                }
+            }
         }
     }
 
