@@ -1,23 +1,24 @@
-name: Build DLL Hook
+name: Build Hook DLL
 
 on: [push]
 
 jobs:
   build:
     runs-on: windows-latest
-
     steps:
-    - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-    - name: Add MSBuild to PATH
-      uses: microsoft/setup-msbuild@v1.1
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
 
-    - name: Build Project
-      run: |
-        msbuild /p:Configuration=Release /p:Platform=x64
+      - name: Compile DLL
+        run: |
+          cl.exe /LD /O2 /Fe:hook.dll main.cpp user32.lib kernel32.lib
 
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v3
-      with:
-        name: Hook-DLL
-        path: x64/Release/*.dll
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: my-hook-dll
+          path: hook.dll
