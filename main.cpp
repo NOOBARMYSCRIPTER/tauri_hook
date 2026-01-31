@@ -41,55 +41,41 @@ static HMODULE LoadMinHookNearModule() {
     return LoadLibraryA("MinHook.x64.dll");
 }
 
-void TryLogData(const char* label, int offset, uintptr_t ptr, size_t len) {
-    if (len == 0 || len > 2048 || IsBadReadPtr((void*)ptr, len)) return;
+void DumpMemoryStrings(const char* label, uintptr_t startAddr, size_t range) {
+    if (IsBadReadPtr((void*)startAddr, range)) return;
 
-    std::string ascii((char*)ptr, len);
-    bool isAscii = true;
-    for (char c : ascii) {
-        if (c != 0 && (c < 32 || c > 126)) { isAscii = false; break; }
-    }
+    for (size_t i = 0; i < range - 8; i += 1) {
+        const char* potentialStr = (const char*)(startAddr + i);
+        
+        bool looksLikeJson = (potentialStr[0] == '{' && potentialStr[1] == '"');
+        bool looksLikeHeader = (strnicmp(potentialStr, "user-agent", 10) == 0 || 
+                               strnicmp(potentialStr, "content-type", 12) == 0 ||
+                               strnicmp(potentialStr, "authorization", 13) == 0 ||
+                               strnicmp(potentialStr, "x-", 2) == 0);
 
-    if (isAscii && ascii.length() > 0) {
-        Logf("[%s] Offset %d: (ASCII) '%s'", label, offset, ascii.c_str());
-    } 
-    else {
-        try {
-            std::wstring wstr((wchar_t*)ptr, len / 2);
-            if (wstr.length() > 0) {
-                Logf("[%s] Offset %d: (UTF16) '%ls'", label, offset, wstr.c_str());
-            }
-        } catch (...) {}
+        if (looksLikeJson || looksLikeHeader) {
+            Logf("[%s] Found at offset +%llu: %s", label, i, potentialStr);
+        }
     }
 }
 
 __int64 __fastcall detoursSub1403A447E(__int64 a1, __int64* a2, char* a3) {
+    Logf("--- Hook Triggered (Deep Scan) ---");
+
     if (a3) {
         char* urlPtr = *(char**)(a3 + 104);
-        size_t urlLen = *(size_t*)(a3 + 112);
+        if (!IsBadReadPtr(urlPtr, 1)) Logf("[URL] %s", urlPtr);
         
-        if (urlPtr && !IsBadReadPtr(urlPtr, urlLen) && urlLen < 1024) {
-            Logf("[URL] %.*s", (int)urlLen, urlPtr);
-        }
+        DumpMemoryStrings("A3_SCAN", (uintptr_t)a3, 512);
     }
 
     if (a2) {
-        for (int i = 0; i < 40; i++) {
-            uintptr_t maybePtr = (uintptr_t)a2[i];
-            size_t maybeLen = (size_t)a2[i + 1];
-
-            if (maybeLen > 2 && maybeLen < 5000 && !IsBadReadPtr((void*)maybePtr, maybeLen)) {
-                char* data = (char*)maybePtr;
-
-                if (data[0] == '{' && data[maybeLen-1] == '}') {
-                    Logf("[BODY JSON] %.*s", (int)maybeLen, data);
-                }
-                else if (strnicmp(data, "Bearer", 6) == 0 || strnicmp(data, "Seliware", 8) == 0) {
-                    Logf("[HEADER/AUTH] %.*s", (int)maybeLen, data);
-                }
-                else if (maybeLen > 15 && isprint(data[0]) && isprint(data[1])) {
-                    Logf("[RAW DATA %d] %.*s", i*8, (int)maybeLen, data);
-                }
+        DumpMemoryStrings("A2_SCAN", (uintptr_t)a2, 512);
+        
+        for (int j = 0; j < 32; j++) {
+            uintptr_t ptr = (uintptr_t)a2[j];
+            if (ptr > 0x10000 && !IsBadReadPtr((void*)ptr, 64)) {
+                DumpMemoryStrings("A2_INDIR_SCAN", ptr, 256);
             }
         }
     }
