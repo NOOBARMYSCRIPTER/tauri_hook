@@ -42,25 +42,28 @@ std::string HexDump(void* ptr, int size) {
 __int64 __fastcall detoursSub1403A3DBB(__int64* a1, __int64 a2, __int64 a3) {
     __int64 result = fpSub1403A3DBB(a1, a2, a3);
 
-    static int calls = 0;
-    if (++calls % 5 == 0) {
-        Logf(">>> sub_1403A3DBB Called (%d). Result: %lld", calls, result);
+    if (a1 && (*(char*)a1 == 0)) {
+        Logf(">>> STATUS READY DETECTED");
+
+        uintptr_t dataPtr = (uintptr_t)a1[4]; 
         
-        if (a1) {
-            Logf("    a1 Dump: %s", HexDump(a1, 48).c_str());
-            
-            uintptr_t dataPtr = a1[1];
-            if (dataPtr > 0x10000 && !IsBadReadPtr((void*)dataPtr, 64)) {
-                Logf("    Data at [a1+8]: %s", HexDump((void*)dataPtr, 64).c_str());
-                
-                char* s = (char*)dataPtr;
-                for (int i = 0; i < 60; i++) {
-                    if (s[i] == 'h' && s[i+1] == 't' && s[i+2] == 't') {
-                        Logf("    [!] Possible URL: %s", &s[i]);
-                        break;
+        if (dataPtr > 0x100000) {
+            Logf("    Deep Dump at [a1+32] (Address: %p):", (void*)dataPtr);
+            Logf("    Data: %s", HexDump((void*)dataPtr, 128).c_str());
+
+            char* s = (char*)dataPtr;
+            if (!IsBadReadPtr(s, 128)) {
+                for (int i = 0; i < 110; i++) {
+                    if ((s[i] == 'h' && s[i+1] == 't') || (s[i] == '{' && s[i+1] == '"')) {
+                        Logf("    [!!!] STRING FOUND: %s", &s[i]);
                     }
                 }
             }
+        }
+        
+        uintptr_t dataPtrAlt = (uintptr_t)a1[1];
+        if (dataPtrAlt > 0x100000 && !IsBadReadPtr((void*)dataPtrAlt, 16)) {
+             Logf("    Alt Dump at [a1+8]: %s", HexDump((void*)dataPtrAlt, 64).c_str());
         }
     }
 
