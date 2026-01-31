@@ -64,21 +64,24 @@ void TryLogData(const char* label, int offset, uintptr_t ptr, size_t len) {
 }
 
 __int64 __fastcall detoursSub1403A447E(__int64 a1, __int64* a2, char* a3) {
-    Logf("--- Hook sub_1403A447E ---");
-
     if (a3) {
-        for (int i = 0; i <= 128; i += 8) {
-            uintptr_t p = *(uintptr_t*)(a3 + i);
-            size_t l = *(size_t*)(a3 + i + 8);
-            TryLogData("ARG_A3", i, p, l);
-        }
-    }
+        char* urlPtr = *(char**)(a3 + 120);
+        size_t urlLen = *(size_t*)(a3 + 128); 
 
-    if (a2) {
-        for (int i = 0; i <= 128; i += 8) {
-            uintptr_t p = (uintptr_t)a2[i/8];
-            size_t l = (size_t)a2[i/8 + 1];
-            TryLogData("ARG_A2", i, p, l);
+        if (urlPtr && !IsBadReadPtr(urlPtr, 1)) {
+            std::string finalUrl;
+            if (urlLen > 0 && urlLen < 2048) {
+                finalUrl = std::string(urlPtr, urlLen);
+            } else {
+                finalUrl = std::string(urlPtr);
+            }
+
+            Logf("[!!!] TARGET HOST/URL: %s", finalUrl.c_str());
+        }
+        
+        char* altPtr = *(char**)(a3 + 112);
+        if (altPtr && !IsBadReadPtr(altPtr, 1) && !IsBadCodePtr((FARPROC)altPtr)) {
+             Logf("[DEBUG] Data at offset 112: %.32s", altPtr);
         }
     }
 
