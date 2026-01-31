@@ -55,16 +55,21 @@ __int64 __fastcall detoursSub1403A447E(__int64 a1, __int64* a2, char* a3) {
     Logf("[DEBUG] Function sub_1403A447E called!");
 
     if (a3) {
-        HexDump("a3_dump", a3, 128);
-
         for (int offset = 0; offset <= 112; offset += 8) {
-            char* maybePtr = *(char**)(a3 + offset);
+            uintptr_t maybePtr = *(uintptr_t*)(a3 + offset);
             size_t maybeLen = *(size_t*)(a3 + offset + 8);
 
-            if (maybeLen > 10 && maybeLen < 500 && !IsBadReadPtr(maybePtr, maybeLen)) {
-                if (maybePtr[0] == 'h' && maybePtr[1] == 't') {
-                    std::string url(maybePtr, maybeLen);
-                    Logf("[FOUND!] Offset %d -> URL: %s", offset, url.c_str());
+            if (maybeLen > 0 && maybeLen < 1024 && !IsBadReadPtr((void*)maybePtr, maybeLen)) {
+                char* strData = (char*)maybePtr;
+                
+                char preview[17] = {0};
+                memcpy(preview, strData, maybeLen > 16 ? 16 : maybeLen);
+                
+                Logf("[INFO] Offset %d: Ptr=%p, Len=%llu, Data='%s'", offset, (void*)maybePtr, maybeLen, preview);
+
+                if (maybeLen > 4 && strncmp(strData, "http", 4) == 0) {
+                    std::string url(strData, maybeLen);
+                    Logf("[!!!] FOUND URL at Offset %d: %s", offset, url.c_str());
                 }
             }
         }
