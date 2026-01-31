@@ -15,10 +15,22 @@ jobs:
 
       - name: Compile DLL
         run: |
-          cl.exe /LD /O2 /Fe:hook.dll main.cpp user32.lib kernel32.lib
+          cl.exe /LD /O2 /EHsc /Fe:hook.dll main.cpp user32.lib kernel32.lib
 
-      - name: Upload
+      - name: Prepare artifacts folder
+        shell: cmd
+        run: |
+          if exist out rmdir /S /Q out
+          mkdir out
+          copy /Y hook.dll out\hook.dll
+          if exist MinHook.x64.dll (
+            copy /Y MinHook.x64.dll out\MinHook.x64.dll
+          ) else (
+            echo WARNING: MinHook.x64.dll not found in root, please add it to repo!
+          )
+
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: my-hook-dll
-          path: hook.dll
+          name: release-build
+          path: out/
